@@ -1,6 +1,7 @@
 # We need to put these in a separate module so they're easy to import
 # on a test-by-test basis so that we can skip django-requiring tests
 # if django isn't installed.
+from uuid import UUID
 
 
 from elasticutils.contrib.django import MappingType, Indexable
@@ -22,14 +23,20 @@ class SearchQuerySet(object):
     # Yes. This is kind of crazy, but ... whatever.
     def __init__(self, model):
         self.model = model
+        self.id_field = model.id_field
         self.steps = []
 
-    def get(self, pk):
-        pk = int(pk)
-        return [m for m in _model_cache if m.id == pk][0]
+    def get(self, pk=None, uuid=None):
+        if pk:
+            pk = int(pk)
+            return [m for m in _model_cache if m.id == pk][0]
+        if uuid:
+            uuid = UUID(uuid)
+            return [m for m in _model_cache if m.uuid == uuid][0]
+        return []
 
-    def filter(self, id__in=None):
-        self.steps.append(('filter', id__in))
+    def filter(self, id__in=None, uuid__in=None):
+        self.steps.append(('filter', id__in or uuid__in))
         return self
 
     def order_by(self, *fields):
@@ -47,7 +54,8 @@ class SearchQuerySet(object):
 
         for mem in self.steps:
             if mem[0] == 'filter':
-                objs = [obj for obj in objs if obj.id in mem[1]]
+                objs = [obj for obj in objs
+                        if getattr(obj, self.id_field) in mem[1]]
             elif mem[0] == 'order_by':
                 order_by_field = mem[1][0]
             elif mem[0] == 'values_list':
@@ -58,7 +66,7 @@ class SearchQuerySet(object):
 
         if values_list:
             # Note: Hard-coded to just id and flat
-            objs = [obj.id for obj in objs]
+            objs = [getattr(obj, self.id_field) for obj in objs]
         return iter(objs)
 
 
@@ -66,8 +74,8 @@ class Manager(object):
     def get_query_set(self):
         return SearchQuerySet(self)
 
-    def get(self, pk):
-        return self.get_query_set().get(pk)
+    def get(self, pk=None, uuid=None):
+        return self.get_query_set().get(pk=pk, uuid=uuid)
 
     def filter(self, *args, **kwargs):
         return self.get_query_set().filter(*args, **kwargs)
@@ -84,6 +92,7 @@ class FakeModel(object):
     objects = Manager()
 
     def __init__(self, **kw):
+        self.objects.id_field = kw.pop('id_field', 'id')
         self._doc = kw
         for key in kw:
             setattr(self, key, kw[key])
@@ -102,3 +111,12 @@ class FakeDjangoMappingType(MappingType, Indexable):
                              'what to do with these args.')
 
         return obj._doc
+
+class FakeDjangoWithUuidMappingType(FakeDjangoMappingType):
+    id_field = 'uuid'
+
+    @classmethod
+    def extract_document(cls, obj_id, obj=None):
+        doc = super(FakeDjangoWithUuidMappingType, cls)\
+            .extract_document(obj_id, obj=obj)
+        return {k:str(v) for k,v in doc.iteritems()}

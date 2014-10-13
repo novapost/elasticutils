@@ -197,6 +197,9 @@ class MappingType(BaseMappingType):
     `get_model()`.
 
     """
+
+    id_field = 'pk'
+
     def get_object(self):
         """Returns the database object for this result
 
@@ -205,7 +208,8 @@ class MappingType(BaseMappingType):
             self.get_model().objects.get(pk=self._id)
 
         """
-        return self.get_model().objects.get(pk=self._id)
+        kwargs = {self.id_field: self._id}
+        return self.get_model().objects.get(**kwargs)
 
     @classmethod
     def get_model(cls):

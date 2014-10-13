@@ -1,9 +1,12 @@
+import uuid
+
 from nose.tools import eq_
 
 from elasticutils.contrib.django import get_es
 from elasticutils.contrib.django.tasks import index_objects, unindex_objects
 from elasticutils.contrib.django.tests import (
-    FakeDjangoMappingType, FakeModel, reset_model_cache)
+    FakeDjangoMappingType, FakeDjangoWithUuidMappingType, FakeModel,
+    reset_model_cache)
 from elasticutils.contrib.django.estestcase import ESTestCase
 
 
@@ -76,7 +79,7 @@ class TestTasks(ESTestCase):
         index_objects(MockMappingType, [1, 2, 3], chunk_size=1)
         eq_(MockMappingType.bulk_index_count, 3)
 
-        # test index and es kwargs 
+        # test index and es kwargs
         MockMappingType.index_kwarg = None
         MockMappingType.es_kwarg = None
         index_objects(MockMappingType, [1, 2, 3])
@@ -86,3 +89,34 @@ class TestTasks(ESTestCase):
         index_objects(MockMappingType, [1, 2, 3], es='crazy_es', index='crazy_index')
         eq_(MockMappingType.index_kwarg, 'crazy_index')
         eq_(MockMappingType.es_kwarg, 'crazy_es')
+
+    def test_tasks_with_custom_id_field(self):
+        docs = [
+            {'uuid': uuid.uuid4(), 'name': 'odin skullcrusher'},
+            {'uuid': uuid.uuid4(), 'name': 'heimdall kneebiter'},
+            {'uuid': uuid.uuid4(), 'name': 'erik rose'}
+            ]
+
+        for d in docs:
+            FakeModel(id_field='uuid', **d)
+
+        ids = [d['uuid'] for d in docs]
+
+        # Test index_objects task
+        index_objects(FakeDjangoWithUuidMappingType, ids)
+        FakeDjangoWithUuidMappingType.refresh_index()
+        # need some sleep ?
+        from time import sleep; sleep(1)
+        # nothing was indexed because a StandardError was catched silently,
+        # may be explicit should be better.
+        eq_(FakeDjangoWithUuidMappingType.search().count(), 0)
+
+        # Test everything has been indexed
+        index_objects(FakeDjangoWithUuidMappingType, ids, id_field='uuid')
+        FakeDjangoWithUuidMappingType.refresh_index()
+        eq_(FakeDjangoWithUuidMappingType.search().count(), 3)
+
+        # Test unindex_objects task
+        unindex_objects(FakeDjangoWithUuidMappingType, ids)
+        FakeDjangoWithUuidMappingType.refresh_index()
+        eq_(FakeDjangoWithUuidMappingType.search().count(), 0)

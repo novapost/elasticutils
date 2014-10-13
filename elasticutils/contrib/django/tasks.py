@@ -10,7 +10,8 @@ log = logging.getLogger('elasticutils')
 
 
 @task
-def index_objects(mapping_type, ids, chunk_size=100, es=None, index=None):
+def index_objects(mapping_type, ids, chunk_size=100, id_field='id', es=None,
+                  index=None):
     """Index documents of a specified mapping type.
 
     This allows for asynchronous indexing.
@@ -48,21 +49,24 @@ def index_objects(mapping_type, ids, chunk_size=100, es=None, index=None):
 
     # Get the model this mapping type is based on.
     model = mapping_type.get_model()
+    filter_key = '{0}__in'.format(id_field)
 
     # Retrieve all the objects that we're going to index and do it in
     # bulk.
     for id_list in chunked(ids, chunk_size):
         documents = []
 
-        for obj in model.objects.filter(id__in=id_list):
+        for obj in model.objects.filter(**{filter_key: id_list}):
             try:
-                documents.append(mapping_type.extract_document(obj.id, obj))
-            except Exception as exc:
+                _id = str(getattr(obj, id_field))
+                documents.append(mapping_type.extract_document(_id, obj))
+            except StandardError as exc:
                 log.exception('Unable to extract document {0}: {1}'.format(
                         obj, repr(exc)))
 
         if documents:
-            mapping_type.bulk_index(documents, id_field='id', es=es, index=index)
+            mapping_type.bulk_index(documents, id_field=id_field, es=es,
+                                    index=index)
 
 
 @task
